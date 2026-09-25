@@ -1,0 +1,18 @@
+name: OSV-Scanner PR
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions: {}
+
+jobs:
+  osv-pr-scan:
+    name: OSV-Scanner PR Diff
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@v2.6.0
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    with:
+      fail-on-vuln: true

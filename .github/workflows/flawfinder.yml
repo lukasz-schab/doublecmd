@@ -1,0 +1,68 @@
+name: Flawfinder C-C++ Security Lint
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "**/*.c"
+      - "**/*.cc"
+      - "**/*.cpp"
+      - "**/*.cxx"
+      - "**/*.h"
+      - "**/*.hh"
+      - "**/*.hpp"
+      - "**/*.hxx"
+  pull_request:
+    branches: [master]
+    paths:
+      - "**/*.c"
+      - "**/*.cc"
+      - "**/*.cpp"
+      - "**/*.cxx"
+      - "**/*.h"
+      - "**/*.hh"
+      - "**/*.hpp"
+      - "**/*.hxx"
+  workflow_dispatch:
+
+concurrency:
+  group: flawfinder-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  flawfinder:
+    name: Flawfinder
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Install pinned Flawfinder
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check flawfinder==2.0.20
+
+      - name: Run Flawfinder
+        shell: bash
+        run: |
+          flawfinder --sarif --quiet --minlevel=3 . > flawfinder.sarif
+
+      - name: Upload Flawfinder results
+        if: always() && hashFiles('flawfinder.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: flawfinder.sarif
+          category: flawfinder

@@ -1,93 +1,60 @@
-﻿rules:
-
-  #
-  # OS command execution
-  #
-
+rules:
   - id: pascal-command-execution-string-concatenation
-    languages:
-      - generic
+    languages: [generic]
     severity: WARNING
-    message: >
-      Security hotspot: command execution contains dynamically concatenated
-      data. Verify whether any concatenated value can originate from an
-      untrusted source and whether argument separation is preserved.
+    message: >-
+      Security hotspot: command execution contains dynamically concatenated data.
+      Verify whether any concatenated value can originate from an untrusted source
+      and whether argument separation is preserved.
     metadata:
       category: security-hotspot
       confidence: MEDIUM
       cwe: CWE-78
     pattern-regex: '(?i)\b(?:fpSystem|ExecuteProcess|RunCommand|ShellExecute|ShellExecuteEx)\s*\([^\r\n]*\+[^\r\n]*\)'
 
-
-  #
-  # SQL construction
-  #
-
   - id: pascal-sql-string-concatenation
-    languages:
-      - generic
+    languages: [generic]
     severity: WARNING
-    message: >
+    message: >-
       Security hotspot: SQL statement appears to be constructed using string
-      concatenation. Verify that dynamic values cannot contain attacker
-      controlled SQL syntax and prefer parameterized queries.
+      concatenation. Verify attacker control and prefer parameterized queries.
     metadata:
       category: security-hotspot
       confidence: MEDIUM
       cwe: CWE-89
     pattern-regex: '(?i)\b(?:SQL\.Text|SQL\.Add|Query\.SQL\.Text|Query\.SQL\.Add)[^\r\n]*\+[^\r\n]*'
 
-
-  #
-  # TLS / certificate validation
-  #
-
   - id: pascal-tls-certificate-validation-disabled
-    languages:
-      - generic
+    languages: [generic]
     severity: WARNING
-    message: >
-      Security hotspot: certificate or peer verification appears to be
-      explicitly disabled. Verify that this code cannot be reached for
-      production network connections.
+    message: >-
+      Security hotspot: certificate or peer verification appears to be explicitly
+      disabled. Verify that this code cannot be reached for production connections.
     metadata:
       category: security-hotspot
       confidence: MEDIUM
       cwe: CWE-295
     pattern-regex: '(?i)\b(?:VerifyPeer|VerifyCertificate|SSLVerifyCert|CheckCertificate|VerifyCert)\s*:=\s*False\s*;'
 
-
-  #
-  # Hardcoded credential-like values
-  #
-
   - id: pascal-hardcoded-credential-like-value
-    languages:
-      - generic
+    languages: [generic]
     severity: WARNING
-    message: >
-      Security hotspot: a credential-like variable is assigned a string
-      literal. Verify that the value is not an actual password, secret,
-      token or API key.
+    message: >-
+      Security hotspot: a credential-like variable is assigned a string literal.
+      Verify that the value is not an actual password, secret, token or API key.
     metadata:
       category: security-hotspot
       confidence: LOW
       cwe: CWE-798
-    pattern-regex: '(?i)\b(?:password|passwd|api[_-]?key|secret|token)\w*\s*:=\s*''[^'']{8,}''\s*;'
-
-
-  #
-  # Dynamic library loading
-  #
+    pattern-regex: "(?i)\\b(?:password|passwd|api[_-]?key|secret|token)\\w*\\s*:=\\s*'[^']{8,}'\\s*;"
 
   - id: pascal-dynamic-library-path-concatenation
-    languages:
-      - generic
+    languages: [generic]
     severity: INFO
-    message: >
-      Security hotspot: a dynamic library path appears to be assembled using
-      string concatenation. Verify that untrusted input cannot influence the
-      library search path or selected library.
+    message: >-
+      Security hotspot: a dynamic library path appears to be assembled using string
+      concatenation. Verify that untrusted input cannot influence the library search
+      path or selected library.
     metadata:
       category: security-hotspot
       confidence: MEDIUM
