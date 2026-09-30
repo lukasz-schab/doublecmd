@@ -4384,7 +4384,7 @@ msgstr "Удалено:"
 
 #: tfrmoptionscolors.lbldirselection.caption
 msgid "Directory Selection:"
-msgstr ""
+msgstr "Выделение каталога:"
 
 #: tfrmoptionscolors.lblerror.caption
 msgid "Error:"
@@ -9403,6 +9403,10 @@ msgstr "Синхронизировать"
 #: tfrmsyncdirsperformdlg.chkconfirmoverwrites.caption
 msgid "Confirm overwrites"
 msgstr "Подтвердить замену"
+
+#: tfrmsyncdirsperformdlg.chkverify.caption
+msgid "Verify"
+msgstr "Проверить после завершения"
 
 #: tfrmtreeviewmenu.caption
 msgctxt "tfrmtreeviewmenu.caption"

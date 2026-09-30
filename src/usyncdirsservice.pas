@@ -11,7 +11,7 @@ uses
   LazFileUtils,
   DCStrUtils, DCOSUtils, DCClassesUtf8, uDCUtils,
   uDebug, uGlobs,
-  uFile, uFileSource, uFileSourceManager, uFileSourceUtil,
+  uFile, uFileSource, uFileSourceManager, uFileSourceUtil, uFileSystemFileSource,
   uFileSourceOperation, uFileSourceCopyOperation, uFileSourceOperationTypes,
   uSyncDirsModel;
 
@@ -38,18 +38,24 @@ type
 
   TSyncDirsOperationHandle = procedure ( const operation: TFileSourceOperation; const state: TFileSourceOperationState ) is nested;
 
-  { TSyncDirsFileUtil }
+  { TSyncDirsUtil }
 
-  TSyncDirsFileUtil = class
+  TSyncDirsUtil = class
   public
     class function consultCopyOperation(var params: TFileSourceConsultParams): Boolean;
     class function consultAndConfirmCopyOperation(var params: TFileSourceConsultParams): Boolean;
     class function supportsSyncDirs(const sourceFS: IFileSource; const targetFS: IFileSource): Boolean;
+    class function supportsVerify(const sourceFS: IFileSource; const targetFS: IFileSource): Boolean;
+  public
+    class function selectionToStringList(
+      const filteredList: TFlatDirFileList;
+      const indexes: TIntegerList;
+      const option: TSyncDirsCompareOption ): TStringList;
   public
     class function copyFiles(
       const sourceFS: IFileSource;
       const targetFS: IFileSource;
-      const files: TFiles;
+      var files: TFiles;
       const targetPath: String;
       const operationHandle: TSyncDirsOperationHandle ): Boolean;
     class function deleteFiles(
@@ -64,7 +70,7 @@ type
     function fileProcessorWithUICopyFiles(
       const sourceFS: IFileSource;
       const targetFS: IFileSource;
-      const files: TFiles;
+      var files: TFiles;
       const targetPath: String): Boolean;
     function fileProcessorWithUIDeleteFiles(
       const fs: IFileSource;
@@ -74,22 +80,34 @@ type
       const f: TFile): Boolean;
   end;
 
-  { TSyncDirsService }
+  { TSyncDirsSortService }
 
-  TSyncDirsService = class
+  TSyncDirsSortService = class
   private
     _sortIndex: Integer;
     _sortDesc: Boolean;
   public
     procedure sortTree( const tree: TTwoLevelTree );
     procedure sortDirItem( const dirItem: TTwoLevelTreeDirItem );
-    function selectionToStringList(
-      const FFilteredList: TFlatDirFileList;
-      const indexes: TIntegerList;
-      const Option: TSyncDirsCompareOption ): TStringList;
 
     property sortIndex: Integer write _sortIndex;
     property sortDesc: Boolean write _sortDesc;
+  end;
+
+  { TSyncDirsDeleteService }
+
+  TSyncDirsDeleteService = class
+  private
+    _fileProcessor: ISyncDirsFileProcessorWithUI;
+    _filteredList: TFlatDirFileList;
+    _leftFS: IFileSource;
+    _rightFS: IFileSource;
+  public
+    constructor Create( const fileProcessor: ISyncDirsFileProcessorWithUI; const filteredList: TFlatDirFileList );
+    procedure delete( const indexes: TIntegerList; const deleteLeft: Boolean; const deleteRight: Boolean );
+
+    property leftFS: IFileSource write _leftFS;
+    property rightFS: IFileSource write _rightFS;
   end;
 
   { ISyncDirsTreeBuilderCallback }
@@ -106,7 +124,7 @@ type
   TSyncDirsTreeBuilder = class
   private
     _callback: ISyncDirsTreeBuilderCallback;
-    _sortedService: TSyncDirsService;
+    _sortedService: TSyncDirsSortService;
     _compareOption: TSyncDirsCompareOption;
     _baseDirL: String;
     _baseDirR: String;
@@ -117,7 +135,7 @@ type
   public
     constructor Create(
       const callback: ISyncDirsTreeBuilderCallback;
-      const sortService: TSyncDirsService;
+      const sortService: TSyncDirsSortService;
       const compareOption: TSyncDirsCompareOption );
     procedure build( const FFullTree: TTwoLevelTree );
 
@@ -188,9 +206,9 @@ type
 
 implementation
 
-{ TSyncDirsFileUtil }
+{ TSyncDirsUtil }
 
-class function TSyncDirsFileUtil.consultCopyOperation( var params: TFileSourceConsultParams ): Boolean;
+class function TSyncDirsUtil.consultCopyOperation( var params: TFileSourceConsultParams ): Boolean;
 begin
   Result:= False;
   params.operationType:= fsoCopy;
@@ -202,7 +220,7 @@ begin
   Result:= True;
 end;
 
-class function TSyncDirsFileUtil.consultAndConfirmCopyOperation( var params: TFileSourceConsultParams ): Boolean;
+class function TSyncDirsUtil.consultAndConfirmCopyOperation( var params: TFileSourceConsultParams ): Boolean;
 begin
   Result:= False;
   if consultCopyOperation(params) then
@@ -214,7 +232,7 @@ begin
   Result:= True;
 end;
 
-class function TSyncDirsFileUtil.supportsSyncDirs(
+class function TSyncDirsUtil.supportsSyncDirs(
   const sourceFS: IFileSource;
   const targetFS: IFileSource): Boolean;
 var
@@ -226,10 +244,70 @@ begin
   Result:= consultCopyOperation(params);
 end;
 
-class function TSyncDirsFileUtil.copyFiles(
+class function TSyncDirsUtil.supportsVerify(
+  const sourceFS: IFileSource;
+  const targetFS: IFileSource): Boolean;
+begin
+  Result:= sourceFS.IsClass(TFileSystemFileSource) AND targetFS.IsClass(TFileSystemFileSource);
+end;
+
+class function TSyncDirsUtil.selectionToStringList(
+  const filteredList: TFlatDirFileList;
+  const indexes: TIntegerList;
+  const option: TSyncDirsCompareOption ): TStringList;
+
+  procedure PrintRow(sl: TStringList; R: Integer);
+  var
+    s: string;
+    SyncRec: TFileSyncRec;
+  begin
+    SyncRec := filteredList.fileSyncRec(R);
+    if SyncRec.isDir then
+    begin
+      s := filteredList.path(R);
+      if cfEmptyDirs in option.flags then begin
+        if SyncRec.state <> srsDoNothing then
+          s := s + #9#9#9 + SYNC_REC_STATE_SYMBOL[SyncRec.action];
+      end;
+    end
+    else
+    begin
+      if Assigned(SyncRec.leftFile) then
+      begin
+        s := filteredList.path(R) + #9 +
+             IntToStrTS(SyncRec.leftFile.Size) + #9 +
+             FormatDateTime(gDateTimeFormatSync, SyncRec.leftFile.ModificationTime);
+      end
+      else
+      begin
+        s := #9#9;
+      end;
+      s := s + #9 + SYNC_REC_STATE_SYMBOL[SyncRec.action] + #9;
+      if Assigned(SyncRec.rightFile) then
+      begin
+        s := s +
+             FormatDateTime(gDateTimeFormatSync, SyncRec.rightFile.ModificationTime) + #9 +
+             IntToStrTS(SyncRec.rightFile.Size) + #9 +
+             filteredList.path(R);
+      end;
+    end;
+    sl.Add(s);
+  end;
+
+var
+  sl: TStringList;
+  i: Integer;
+begin
+  sl:= TStringList.Create;
+  for i in indexes do
+    PrintRow( sl, i );
+  Result:= sl;
+end;
+
+class function TSyncDirsUtil.copyFiles(
   const sourceFS: IFileSource;
   const targetFS: IFileSource;
-  const files: TFiles;
+  var files: TFiles;
   const targetPath: String;
   const operationHandle: TSyncDirsOperationHandle ): Boolean;
 var
@@ -243,7 +321,7 @@ begin
   params.targetFS:= targetFS;
   params.files:= files;
   params.targetPath:= targetPath;
-  Result:= TSyncDirsFileUtil.consultAndConfirmCopyOperation(params);
+  Result:= TSyncDirsUtil.consultAndConfirmCopyOperation(params);
   if NOT Result then
     Exit;
 
@@ -256,26 +334,27 @@ begin
       begin
         // Copy within the same file source.
         fsOperation := params.resultFS.CreateCopyOperation(
-                      params.files,
-                      params.resultTargetPath ) as TFileSourceCopyOperation;
+                         params.files,
+                         params.resultTargetPath ) as TFileSourceCopyOperation;
       end;
     fsoCopyOut:
       begin
         // CopyOut to filesystem.
         fsOperation := params.resultFS.CreateCopyOutOperation(
-                       targetFS,
-                       params.files,
-                       params.resultTargetPath) as TFileSourceCopyOperation;
+                         targetFS,
+                         params.files,
+                         params.resultTargetPath) as TFileSourceCopyOperation;
       end;
     fsoCopyIn:
       begin
         // CopyIn from filesystem.
         fsOperation := params.resultFS.CreateCopyInOperation(
-                       sourceFS,
-                       params.files,
-                       params.resultTargetPath) as TFileSourceCopyOperation;
+                         sourceFS,
+                         params.files,
+                         params.resultTargetPath) as TFileSourceCopyOperation;
       end;
   end;
+  files:= params.files;
   Result:= Assigned(fsOperation);
   if NOT Result then
     Exit;
@@ -290,7 +369,7 @@ begin
   end;
 end;
 
-class function TSyncDirsFileUtil.deleteFiles(
+class function TSyncDirsUtil.deleteFiles(
   const fs: IFileSource;
   var files: TFiles;
   const operationHandle: TSyncDirsOperationHandle ): Boolean;
@@ -316,9 +395,9 @@ begin
   end;
 end;
 
-{ TSyncDirsService }
+{ TSyncDirsSortService }
 
-procedure TSyncDirsService.sortTree( const tree: TTwoLevelTree );
+procedure TSyncDirsSortService.sortTree( const tree: TTwoLevelTree );
 var
   i: Integer;
 begin
@@ -328,7 +407,7 @@ begin
     self.sortDirItem( tree.dirItem(i) );
 end;
 
-procedure TSyncDirsService.sortDirItem( const dirItem: TTwoLevelTreeDirItem );
+procedure TSyncDirsSortService.sortDirItem( const dirItem: TTwoLevelTreeDirItem );
 
   function CompareFn(sl: TStringList; i, j: Integer): Integer;
   var
@@ -434,64 +513,47 @@ begin
   QuickSort( 0, dirItem.fileCount-1, dirItem.files );
 end;
 
-function TSyncDirsService.selectionToStringList(
-  const FFilteredList: TFlatDirFileList;
-  const indexes: TIntegerList;
-  const Option: TSyncDirsCompareOption ): TStringList;
+{ TSyncDirsDeleteService }
 
-  procedure PrintRow(sl: TStringList; R: Integer);
-  var
-    s: string;
-    SyncRec: TFileSyncRec;
-  begin
-    SyncRec := FFilteredList.fileSyncRec(R);
-    if SyncRec.isDir then
-    begin
-      s := FFilteredList.path(R);
-      if cfEmptyDirs in Option.flags then begin
-        if SyncRec.state <> srsDoNothing then
-          s := s + #9#9#9 + SYNC_REC_STATE_SYMBOL[SyncRec.action];
-      end;
-    end
-    else
-    begin
-      if Assigned(SyncRec.leftFile) then
-      begin
-        s := FFilteredList.path(R) + #9 +
-             IntToStrTS(SyncRec.leftFile.Size) + #9 +
-             FormatDateTime(gDateTimeFormatSync, SyncRec.leftFile.ModificationTime);
-      end
-      else
-      begin
-        s := #9#9;
-      end;
-      s := s + #9 + SYNC_REC_STATE_SYMBOL[SyncRec.action] + #9;
-      if Assigned(SyncRec.rightFile) then
-      begin
-        s := s +
-             FormatDateTime(gDateTimeFormatSync, SyncRec.rightFile.ModificationTime) + #9 +
-             IntToStrTS(SyncRec.rightFile.Size) + #9 +
-             FFilteredList.path(R);
-      end;
-    end;
-    sl.Add(s);
-  end;
-
-var
-  sl: TStringList;
-  i: Integer;
+constructor TSyncDirsDeleteService.Create(
+  const fileProcessor: ISyncDirsFileProcessorWithUI;
+  const filteredList: TFlatDirFileList );
 begin
-  sl:= TStringList.Create;
-  for i:= 0 to indexes.Count-1 do
-    PrintRow(sl, indexes[i]);
-  Result:= sl;
+  _fileProcessor:= fileProcessor;
+  _filteredList:= filteredList;
+end;
+
+procedure TSyncDirsDeleteService.delete(
+  const indexes: TIntegerList;
+  const deleteLeft: Boolean;
+  const deleteRight: Boolean );
+var
+  leftFiles: TFiles = nil;
+  rightFiles: TFiles = nil;
+begin
+  try
+    if deleteLeft then
+      leftFiles:= TFiles.Create(EmptyStr);
+    if deleteRight then
+      rightFiles:= TFiles.Create(EmptyStr);
+
+    _filteredList.deleteAndGetSelected( indexes, leftFiles, rightFiles );
+
+    if deleteLeft then
+      _fileProcessor.fileProcessorWithUIDeleteFiles( _leftFS, leftFiles );
+    if deleteRight then
+      _fileProcessor.fileProcessorWithUIDeleteFiles( _rightFS, rightFiles );
+  finally
+    leftFiles.Free;
+    rightFiles.Free;
+  end;
 end;
 
 { TSyncDirsTreeBuilder }
 
 constructor TSyncDirsTreeBuilder.Create(
   const callback: ISyncDirsTreeBuilderCallback;
-  const sortService: TSyncDirsService;
+  const sortService: TSyncDirsSortService;
   const compareOption: TSyncDirsCompareOption );
 begin
   _callback:= callback;
@@ -707,110 +769,130 @@ begin
 end;
 
 procedure TSyncDirsSynchronizer.sync(const syncFlags: TSyncDirsSyncFlags);
+var
+  index: Integer;
+  rec: TFileSyncRec;
 
-  procedure processDir(const syncRec: TFileSyncRec);
+  function processDir: Boolean;
   begin
-    case syncRec.action of
+    Result:= False;
+    case rec.action of
       srsCopyToRight:
         CreateDirectoryFromFile(
           _rightFS,
-          _rightBasePath + syncRec.relPath,
+          _rightBasePath + rec.relPath,
           _leftFS,
-          syncRec.leftFile);
+          rec.leftFile);
       srsCopyToLeft:
         CreateDirectoryFromFile(
           _leftFS,
-          _leftBasePath + syncRec.relPath,
+          _leftBasePath + rec.relPath,
           _rightFS,
-          syncRec.rightFile);
+          rec.rightFile);
       srsDeleteRight:
-        _fileProcessor.fileProcessorWithUIDeleteFile(_rightFS, syncRec.rightFile);
+        if NOT _fileProcessor.fileProcessorWithUIDeleteFile(_rightFS, rec.rightFile) then
+          Exit;
       srsDeleteLeft:
-        _fileProcessor.fileProcessorWithUIDeleteFile(_leftFS, syncRec.leftFile);
+        if NOT _fileProcessor.fileProcessorWithUIDeleteFile(_leftFS, rec.leftFile) then
+          Exit;
     end;
+    Inc( index );
+    Result:= True;
   end;
 
-var
-  i: Integer;
-  rec: TFileSyncRec;
-  copyToLeftFiles: TFiles;
-  copyToRightFiles: TFiles;
-  deleteLeftFiles: TFiles;
-  deleteRightFiles: TFiles;
-  targetPath: string;
-begin
-  i:= 0;
-  while i < _filteredList.Count do begin
+  function processFiles: Boolean;
+  var
+    copyToLeftFiles: TFiles;
+    copyToRightFiles: TFiles;
+    deleteLeftFiles: TFiles;
+    deleteRightFiles: TFiles;
+    targetPath: string;
+
+    function doProcessFiles: Boolean;
+    begin
+      Result:= False;
+
+      repeat
+        case rec.action of
+          srsCopyToRight:
+            if sfCopyToRight in syncFlags then
+              copyToRightFiles.Add(rec.leftFile.Clone);
+          srsCopyToLeft:
+            if sfCopyToLeft in syncFlags then
+              copyToLeftFiles.Add(rec.rightFile.Clone);
+          srsDeleteRight:
+            if sfDeleteRight in syncFlags then
+              deleteRightFiles.Add(rec.rightFile.Clone);
+          srsDeleteLeft:
+            if sfDeleteLeft in syncFlags then
+              deleteLeftFiles.Add(rec.leftFile.Clone);
+          srsDeleteBoth:
+            begin
+              if sfDeleteRight in syncFlags then
+                deleteRightFiles.Add(rec.rightFile.Clone);
+              if sfDeleteLeft in syncFlags then
+                deleteLeftFiles.Add(rec.leftFile.Clone);
+            end;
+        end;
+        index:= index + 1;
+        if index < _filteredList.Count then
+          rec:= _filteredList.fileSyncRec(index);
+      until (index = _filteredList.Count) or rec.isDir;
+
+      if copyToLeftFiles.Count > 0 then begin
+        if NOT _fileProcessor.fileProcessorWithUICopyFiles(_rightFS, _leftFS, copyToLeftFiles, _leftBasePath + targetPath) then
+          Exit;
+      end;
+
+      if copyToRightFiles.Count > 0 then begin
+        if NOT _fileProcessor.fileProcessorWithUICopyFiles(_leftFS, _rightFS, copyToRightFiles, _rightBasePath + targetPath) then
+          Exit;
+      end;
+
+      if deleteLeftFiles.Count > 0 then begin
+        if NOT _fileProcessor.fileProcessorWithUIDeleteFiles(_leftFS, deleteLeftFiles) then
+          Exit;
+      end;
+
+      if deleteRightFiles.Count > 0 then begin
+        if NOT _fileProcessor.fileProcessorWithUIDeleteFiles(_rightFS, deleteRightFiles) then
+          Exit;
+      end;
+
+      Result:= True;
+    end;
+  begin
+    targetPath:= rec.relPath;
+
     copyToLeftFiles:= TFiles.Create('');
     copyToRightFiles:= TFiles.Create('');
     deleteLeftFiles:= TFiles.Create('');
     deleteRightFiles:= TFiles.Create('');
 
-    rec:= _filteredList.fileSyncRec(i);
-    if rec.isDir then begin
-      processDir(rec);
-      i:= i + 1;
-      continue;
-    end;
-
-    repeat
-      targetPath := rec.relPath;
-      case rec.action of
-        srsCopyToRight:
-          if sfCopyToRight in syncFlags then
-            copyToRightFiles.Add(rec.leftFile.Clone);
-        srsCopyToLeft:
-          if sfCopyToLeft in syncFlags then
-            copyToLeftFiles.Add(rec.rightFile.Clone);
-        srsDeleteRight:
-          if sfDeleteRight in syncFlags then
-            deleteRightFiles.Add(rec.rightFile.Clone);
-        srsDeleteLeft:
-          if sfDeleteLeft in syncFlags then
-            deleteLeftFiles.Add(rec.leftFile.Clone);
-        srsDeleteBoth:
-          begin
-            if sfDeleteRight in syncFlags then
-              deleteRightFiles.Add(rec.rightFile.Clone);
-            if sfDeleteLeft in syncFlags then
-              deleteLeftFiles.Add(rec.leftFile.Clone);
-          end;
-      end;
-      i:= i + 1;
-      if i < _filteredList.Count then
-        rec:= _filteredList.fileSyncRec(i);
-    until (i = _filteredList.Count) or rec.isDir;
-
-    if copyToLeftFiles.Count > 0 then begin
-      if NOT _fileProcessor.fileProcessorWithUICopyFiles(_rightFS, _leftFS, copyToLeftFiles, _leftBasePath + targetPath) then
-        Break;
-    end else begin
+    try
+      Result:= doProcessFiles;
+    finally
       copyToLeftFiles.Free;
-    end;
-
-    if copyToRightFiles.Count > 0 then begin
-      if NOT _fileProcessor.fileProcessorWithUICopyFiles(_leftFS, _rightFS, copyToRightFiles, _rightBasePath + targetPath) then
-        Break;
-    end else begin
       copyToRightFiles.Free;
-    end;
-
-    if deleteLeftFiles.Count > 0 then begin
-      if NOT _fileProcessor.fileProcessorWithUIDeleteFiles(_leftFS, deleteLeftFiles) then
-        Break;
-    end else begin
       deleteLeftFiles.Free;
-    end;
-
-    if deleteRightFiles.Count > 0 then begin
-      if NOT _fileProcessor.fileProcessorWithUIDeleteFiles(_rightFS, deleteRightFiles) then
-        Break;
-    end else begin
       deleteRightFiles.Free;
+    end;
+  end;
+
+begin
+  index:= 0;
+  while index < _filteredList.Count do begin
+    rec:= _filteredList.fileSyncRec(index);
+    if rec.isDir then begin
+      if NOT processDir then
+        break;
+    end else begin
+      if NOT processFiles then
+        break;
     end;
 
     if NOT _callback.synchronizerCheckRunning then
-      Break;
+      break;
   end;
 end;
 
