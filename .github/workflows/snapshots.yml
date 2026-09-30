@@ -19,13 +19,18 @@ jobs:
   build-mac:
     runs-on: macos-14
     steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      with:
+        egress-policy: audit
+
     - name: Install Free Pascal
-      uses: doublecmd/lazarus-install@mac
+      uses: doublecmd/lazarus-install@94ae630e73cf6921e866bd1d157374a29e2c899d # mac
       with:
         lazarus-version: "stable"
 
     - name: Get Lazarus source
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
             repository: 'fpc/Lazarus'
 
@@ -41,7 +46,7 @@ jobs:
            sed -i -e "s|_PPCARCH_|fpc|g; s|/Developer/lazarus|/usr/local/share/lazarus|g" $HOME/.lazarus/environmentoptions.xml
 
     - name: Checkout source
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
 
@@ -54,7 +59,7 @@ jobs:
       run: ./.github/scripts/create_snapshot.sh
 
     - name: Share data between jobs
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: snapshot-mac
         retention-days: 1
@@ -64,24 +69,29 @@ jobs:
   build-win:
     runs-on: windows-latest
     steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      with:
+        egress-policy: audit
+
     - name: Install Lazarus
-      uses: doublecmd/lazarus-install@win
+      uses: doublecmd/lazarus-install@ee1d9999908fe25e110d37b61b90845387749423 # win
       with:
         lazarus-version: "stable"
 
     - name: Checkout source
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
 
     - name: Restore timestamps
-      uses: chetan/git-restore-mtime-action@v2
+      uses: chetan/git-restore-mtime-action@d186aca54f8760da4dec55313195e51ed3ebb0b3 # v2.3
 
     - name: Build packages
       run: ./.github/scripts/create_snapshot.bat
 
     - name: Share data between jobs
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: snapshot-win
         retention-days: 1
@@ -91,6 +101,11 @@ jobs:
   build-lin:
     runs-on: ubuntu-22.04
     steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      with:
+        egress-policy: audit
+
     - name: Install dependencies
       run: |
            sudo apt update
@@ -98,7 +113,7 @@ jobs:
                             fp-units-misc fp-units-net fp-utils patchelf libgtk-3-dev libdbus-1-dev zip
 
     - name: Get Lazarus source
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
             repository: 'fpc/Lazarus'
             ref: 'fixes_5'
@@ -115,7 +130,7 @@ jobs:
            sed -i -e "s|__LAZARUSDIR__|/usr/local/share/lazarus|g" $HOME/.lazarus/environmentoptions.xml
 
     - name: Checkout source
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
 
@@ -123,7 +138,7 @@ jobs:
       run: ./.github/scripts/create_snapshot.lnx
 
     - name: Share data between jobs
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: snapshot-lin
         retention-days: 1
@@ -135,8 +150,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: snapshots
     steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      with:
+        egress-policy: audit
+
     - name: Download artifacts
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         merge-multiple: true
 
@@ -145,7 +165,7 @@ jobs:
       shell: bash
 
     - name: Upload binaries to snapshots
-      uses: svenstaro/upload-release-action@v2
+      uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # v2
       with:
         repo_name: doublecmd/snapshots
         repo_token: ${{ secrets.SNAPSHOTS }}
