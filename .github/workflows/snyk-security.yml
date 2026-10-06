@@ -1,0 +1,136 @@
+﻿name: Snyk Security
+
+on:
+  push:
+    branches:
+      - master
+
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+  schedule:
+    # Monday 04:11 UTC
+    - cron: "11 4 * * 1"
+
+  workflow_dispatch:
+
+concurrency:
+  group: snyk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  snyk-code:
+    name: Snyk Code
+
+    # GitHub does not expose repository secrets to pull requests
+    # originating from external forks.
+    #
+    # Do not replace this with pull_request_target.
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install pinned Snyk CLI
+        shell: bash
+        run: |
+          npm install --global snyk@1.1307.4
+          snyk version
+
+      - name: Run Snyk Code analysis
+        id: snyk-code
+        shell: bash
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+
+          snyk code test \
+            --sarif-file-output=snyk-code.sarif
+
+          status=$?
+
+          set -e
+
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+
+          case "$status" in
+            0)
+              echo "Snyk Code completed successfully - no findings."
+              ;;
+            1)
+              echo "Snyk Code completed successfully - findings detected."
+              ;;
+            2)
+              echo "::error::Snyk Code execution failed."
+              exit 2
+              ;;
+            3)
+              echo "::error::Snyk Code did not detect a supported project."
+              exit 3
+              ;;
+            *)
+              echo "::error::Unexpected Snyk exit code: $status"
+              exit "$status"
+              ;;
+          esac
+
+      - name: Upload Snyk Code results to GitHub Code Scanning
+        if: always() && hashFiles('snyk-code.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: snyk-code.sarif
+          category: snyk-code
+
+      - name: Enforce Snyk HIGH severity gate
+        if: always() && steps.snyk-code.outputs.exit_code == '1'
+        shell: bash
+        run: |
+          if [[ ! -f snyk-code.sarif ]]; then
+            echo "::error::Snyk reported findings but SARIF output is missing."
+            exit 1
+          fi
+
+          high_count="$(
+            jq '
+              [
+                .runs[]?.results[]?
+                | select(.level == "error")
+              ]
+              | length
+            ' snyk-code.sarif
+          )"
+
+          echo "Snyk HIGH findings: ${high_count}"
+
+          if [[ "$high_count" -gt 0 ]]; then
+            echo "::error::Snyk Code detected ${high_count} HIGH severity finding(s)."
+            exit 1
+          fi

@@ -1,0 +1,92 @@
+﻿name: Pascal Security Heuristics
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "**/*.pas"
+      - "**/*.pp"
+      - "**/*.inc"
+      - "**/*.lpr"
+      - ".github/semgrep/pascal-security.yml"
+      - ".github/security/requirements.txt"
+      - ".github/workflows/sast-pascal.yml"
+
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "**/*.pas"
+      - "**/*.pp"
+      - "**/*.inc"
+      - "**/*.lpr"
+      - ".github/semgrep/pascal-security.yml"
+      - ".github/security/requirements.txt"
+      - ".github/workflows/sast-pascal.yml"
+
+  schedule:
+    - cron: "13 2 * * 3"
+
+  workflow_dispatch:
+
+concurrency:
+  group: pascal-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  pascal-security:
+    name: Pascal Security Hotspots
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Install Semgrep
+        shell: bash
+        run: |
+          python -m pip install \
+            --disable-pip-version-check \
+            -r .github/security/requirements.txt
+
+      - name: Run Pascal security heuristics
+        shell: bash
+        run: |
+          semgrep scan \
+            --config .github/semgrep/pascal-security.yml \
+            --include="*.pas" \
+            --include="*.pp" \
+            --include="*.inc" \
+            --include="*.lpr" \
+            --metrics=off \
+            --sarif \
+            --output=pascal-security.sarif \
+            src \
+            components \
+            plugins \
+            libraries \
+            sdk \
+            tools
+
+      - name: Upload Pascal security results
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: pascal-security.sarif
+          category: pascal-security-hotspots

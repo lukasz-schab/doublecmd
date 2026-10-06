@@ -1,0 +1,52 @@
+name: DevSkim Security Lint
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: "19 3 * * 5"
+  workflow_dispatch:
+
+concurrency:
+  group: devskim-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  devskim:
+    name: DevSkim
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned DevSkim CLI
+        shell: bash
+        run: |
+          dotnet tool install --tool-path "$RUNNER_TEMP/devskim" Microsoft.CST.DevSkim.CLI --version 1.0.90
+          "$RUNNER_TEMP/devskim/devskim" --version
+
+      - name: Run DevSkim
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/devskim/devskim" analyze \
+            --source-code . \
+            --output-file devskim-results.sarif \
+            --file-format sarif \
+            --ignore-globs "**/.git/**,**/bin/**,**/obj/**"
+
+      - name: Upload DevSkim results
+        if: always() && hashFiles('devskim-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: devskim-results.sarif
+          category: devskim
