@@ -13,13 +13,19 @@ jobs:
   build-mac:
     runs-on: macos-14
     steps:
+    - name: Harden the runner
+      uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+      with:
+        use-policy-store: true
+        api-key: ${{ secrets.STEP_SECURITY_API_KEY }}
+
     - name: Install Free Pascal
-      uses: doublecmd/lazarus-install@mac
+      uses: doublecmd/lazarus-install@94ae630e73cf6921e866bd1d157374a29e2c899d # mac
       with:
         lazarus-version: "stable"
 
     - name: Get Lazarus source
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
             repository: 'fpc/Lazarus'
             ref: 'fixes_4'
@@ -36,7 +42,7 @@ jobs:
            sudo sed -i -e "s|_PPCARCH_|fpc|g; s|/Developer/lazarus|/usr/local/share/lazarus|g" /etc/lazarus/environmentoptions.xml
 
     - name: Checkout source
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
 
@@ -50,7 +56,7 @@ jobs:
       run: ./.github/scripts/create_release.sh
 
     - name: Upload binaries to release
-      uses: svenstaro/upload-release-action@v2
+      uses: step-security/upload-release-action@ecbc6042326f3a6f5a8c1c1202c4fa1b244db249 # v2.11.4
       with:
         file: doublecmd-release/doublecmd*.dmg
         tag: ${{ github.ref }}
@@ -61,6 +67,12 @@ jobs:
     needs: build-mac
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          use-policy-store: true
+          api-key: ${{ secrets.STEP_SECURITY_API_KEY }}
+
       - name: Download release
         run: |
              gh release download $TAG -R doublecmd/doublecmd -D doublecmd-release
